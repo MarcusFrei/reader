@@ -8,6 +8,12 @@ android {
     namespace = "com.example.bookreader"
     compileSdk = 34
 
+    sourceSets {
+        getByName("main") {
+            manifest.srcFile("src/main/AndroidManifest.xml")
+        }
+    }
+
     defaultConfig {
         applicationId = "com.example.bookreader"
         minSdk = 24
