@@ -2,20 +2,6 @@
 
 Android-читалка для телефона (minSdk 24). Kotlin + Jetpack Compose, без Google Play Services.
 
-## Сборка через GitHub
-1. Создайте пустой репозиторий на GitHub и загрузите туда содержимое этой папки:
-   ```
-   git init && git add . && git commit -m "Initial build"
-   git branch -M main
-   git remote add origin https://github.com/<логин>/<репозиторий>.git
-   git push -u origin main
-   ```
-2. Вкладка **Actions** → «Android build» → после зелёной галочки скачайте артефакт **BookReader-debug-apk**.
-3. Установите APK на телефон (разрешите установку из неизвестных источников).
-4. Релиз по тегу: `git tag v0.1.0 && git push --tags` — APK появится в Releases.
-
-Сборку можно запустить и вручную: Actions → Android build → Run workflow.
-
 ## Что есть в v0.1
 - Импорт EPUB, FB2, TXT (в т.ч. windows-1251), через «Добавить», «Поделиться» и «Открыть с помощью»
 - Автоопределение названия, автора, обложки; редактирование; избранное; статусы; скрытие; удаление
