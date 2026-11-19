@@ -169,7 +169,7 @@ private object Fb2Parser {
         val d = load(file)
         val blocks = ArrayList<Block>()
         val chapters = ArrayList<ChapterRef>()
-        for (body in d.select("body").filter { it.attr("name") != "notes" }) walk(body, blocks, chapters)
+        for (body in d.select("body").toList().filter { it.attr("name") != "notes" }) walk(body, blocks, chapters)
         if (chapters.firstOrNull()?.blockIndex != 0) chapters.add(0, ChapterRef(fallbackTitle, 0))
         return BookContent(blocks, chapters)
     }
