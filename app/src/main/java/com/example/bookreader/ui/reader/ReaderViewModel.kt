@@ -20,7 +20,7 @@ import java.io.File
 
 sealed interface LoadState {
     data object Loading : LoadState
-    data class Ready(val content: BookContent, val startIndex: Int) : LoadState
+    data class Ready(val content: BookContent, val startIndex: Int, val startOffset: Int) : LoadState
     data class Error(val message: String) : LoadState
 }
 
@@ -58,7 +58,7 @@ class ReaderViewModel(private val c: AppContainer, private val bookId: Long) : V
                 if (content.blocks.isEmpty()) {
                     _load.value = LoadState.Error("В книге не найден текст")
                 } else {
-                    _load.value = LoadState.Ready(content, b.lastIndex)
+                    _load.value = LoadState.Ready(content, b.lastIndex, b.lastOffset)
                     dao.touch(bookId, System.currentTimeMillis())
                 }
             }.onFailure {
@@ -82,7 +82,7 @@ class ReaderViewModel(private val c: AppContainer, private val bookId: Long) : V
     }
 
     /** Сохраняем в appScope, чтобы запись не отменилась при закрытии экрана. */
-    fun savePosition(index: Int, total: Int) {
+    fun savePosition(index: Int, offset: Int, total: Int) {
         if (total <= 0) return
         val progress = if (total <= 1) 0f else index.toFloat() / (total - 1)
         val cur = book.value?.status ?: "new"
@@ -91,6 +91,6 @@ class ReaderViewModel(private val c: AppContainer, private val bookId: Long) : V
             index > 0 -> "reading"
             else -> cur
         }
-        c.appScope.launch { dao.savePosition(bookId, index, progress, status, System.currentTimeMillis()) }
+        c.appScope.launch { dao.savePosition(bookId, index, offset, progress, status, System.currentTimeMillis()) }
     }
 }

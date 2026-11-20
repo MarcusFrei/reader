@@ -10,7 +10,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
-/** Импорт и удаление книг: копируем файл во внутреннее хранилище приложения. */
+/** Импорт и удаление книг: файл копируется во внутреннее хранилище приложения. */
 class BookStore(private val ctx: Context, private val dao: BookDao) {
 
     private val booksDir get() = File(ctx.filesDir, "books").apply { mkdirs() }
@@ -20,8 +20,8 @@ class BookStore(private val ctx: Context, private val dao: BookDao) {
         var ok = 0
         val errors = mutableListOf<String>()
         for (u in uris) {
-            runCatching { importOne(u) }
-                .onSuccess { ok++ }
+            runCatching { importUri(u) }
+                .onSuccess { ok += it.first; errors += it.second }
                 .onFailure { errors += it.message ?: "ошибка" }
         }
         buildString {
@@ -33,24 +33,67 @@ class BookStore(private val ctx: Context, private val dao: BookDao) {
         }
     }
 
-    private suspend fun importOne(uri: Uri) {
-        val resolver = ctx.contentResolver
+    /** @return (сколько книг добавлено, список ошибок по отдельным файлам архива) */
+    private suspend fun importUri(uri: Uri): Pair<Int, List<String>> {
         val name = displayName(uri) ?: "book"
         val ext = name.substringAfterLast('.', "").lowercase()
-        val mime = resolver.getType(uri).orEmpty().lowercase()
-        val format = when {
+        val mime = ctx.contentResolver.getType(uri).orEmpty().lowercase()
+        val tmp = File(ctx.cacheDir, "import_${UUID.randomUUID()}.tmp")
+        try {
+            ctx.contentResolver.openInputStream(uri)?.use { input ->
+                tmp.outputStream().use { out -> input.copyTo(out) }
+            } ?: error("не удалось открыть файл ($name)")
+
+            val head = ByteArray(8)
+            val n = tmp.inputStream().use { it.read(head) }
+            val kind = ArchiveExtractor.kind(head, n, ext, mime)
+
+            if (kind == null) {
+                importFile(tmp, name, mime, null)
+                return 1 to emptyList()
+            }
+            if (kind == "zip" && ArchiveExtractor.looksLikeEpub(tmp)) {
+                importFile(tmp, name, mime, "epub")
+                return 1 to emptyList()
+            }
+
+            val outDir = File(ctx.cacheDir, "extract_${UUID.randomUUID()}").apply { mkdirs() }
+            try {
+                val items = try {
+                    ArchiveExtractor.extract(kind, tmp, outDir)
+                } catch (e: Exception) {
+                    throw IllegalStateException("$name: ${e.message ?: "не удалось распаковать"}")
+                }
+                if (items.isEmpty()) error("в архиве $name нет книг (EPUB, FB2, TXT)")
+                var ok = 0
+                val errs = mutableListOf<String>()
+                for (item in items) {
+                    runCatching { importFile(item.file, item.name, "", null) }
+                        .onSuccess { ok++ }
+                        .onFailure { errs += it.message ?: item.name }
+                }
+                if (ok == 0) throw IllegalStateException(errs.joinToString("; "))
+                return ok to errs
+            } finally {
+                outDir.deleteRecursively()
+            }
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    private suspend fun importFile(src: File, name: String, mime: String, forcedFormat: String?) {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        val format = forcedFormat ?: when {
             ext == "epub" || mime.contains("epub") -> "epub"
             ext == "fb2" || mime.contains("fictionbook") -> "fb2"
             ext == "txt" || mime == "text/plain" -> "txt"
             ext == "pdf" || mime.contains("pdf") -> error("PDF пока не поддерживается ($name)")
             else -> error("неподдерживаемый формат ($name)")
         }
-        val fallbackTitle = name.substringBeforeLast('.')
+        val fallbackTitle = name.substringBeforeLast('.').removeSuffix(".fb2")
         val dest = File(booksDir, "${UUID.randomUUID()}.$format")
-        resolver.openInputStream(uri)?.use { input ->
-            dest.outputStream().use { out -> input.copyTo(out) }
-        } ?: error("не удалось открыть файл ($name)")
-
+        src.copyTo(dest, overwrite = true)
         try {
             val meta = BookParser.meta(dest, format, fallbackTitle)
             var coverPath: String? = null

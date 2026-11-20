@@ -3,12 +3,16 @@ name: Android build
 on:
   push:
     branches: [main, master]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: write
+
+env:
+  # Поднимайте это число вручную при крупных обновлениях (0.3, 0.4 ...).
+  # Третья цифра = номер сборки в GitHub, versionCode растёт автоматически по времени.
+  VERSION_BASE: "0.2"
 
 jobs:
   build:
@@ -25,17 +29,28 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+      - name: Compute version
+        run: echo "APP_VERSION=${VERSION_BASE}.${{ github.run_number }}" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK
+        run: gradle assembleRelease --stacktrace
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release.apk "BookReader-${APP_VERSION}.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BookReader-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: BookReader-${{ env.APP_VERSION }}
+          path: BookReader-${{ env.APP_VERSION }}.apk
 
-      - name: Publish release (on tag v*)
-        if: startsWith(github.ref, 'refs/tags/v')
+      # Каждая сборка из main публикуется как Release: APK можно скачать прямо с телефона.
+      - name: Publish release
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/debug/*.apk
+          tag_name: v${{ env.APP_VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: Читалка ${{ env.APP_VERSION }}
+          files: BookReader-${{ env.APP_VERSION }}.apk
+          generate_release_notes: true

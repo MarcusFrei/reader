@@ -80,6 +80,8 @@ fun SettingsSheet(
             Chips("Ориентация", OrientationOpt.entries, s.orientation, { it.label }) { v -> onChange { it.copy(orientation = v) } }
             Chips("Прокрутка", ScrollMode.entries, s.scrollMode, { it.label }) { v -> onChange { it.copy(scrollMode = v) } }
             Chips("Анимация страниц", PageAnim.entries, s.pageAnim, { it.label }) { v -> onChange { it.copy(pageAnim = v) } }
+            SwitchRow("Буквица в начале главы", s.dropCap) { v -> onChange { it.copy(dropCap = v) } }
+            SwitchRow("Рамка страницы", s.pageFrame) { v -> onChange { it.copy(pageFrame = v) } }
             SwitchRow("Не выключать экран", s.keepScreenOn) { v -> onChange { it.copy(keepScreenOn = v) } }
             SwitchRow("Защита от случайного выхода", s.exitGuard) { v -> onChange { it.copy(exitGuard = v) } }
             Chips("Таймер сна", listOf(0, 15, 30, 45, 60), sleepMin, { if (it == 0) "Выкл" else "$it мин" }, onSleep)

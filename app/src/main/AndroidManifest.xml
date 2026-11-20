@@ -37,6 +37,12 @@
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/x-fictionbook+xml" />
                 <data android:mimeType="text/plain" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/x-7z-compressed" />
+                <data android:mimeType="application/x-rar-compressed" />
+                <data android:mimeType="application/vnd.rar" />
+                <data android:mimeType="application/x-rar" />
             </intent-filter>
 
             <!-- Импорт через «Поделиться» -->
@@ -46,6 +52,12 @@
                 <data android:mimeType="application/epub+zip" />
                 <data android:mimeType="application/x-fictionbook+xml" />
                 <data android:mimeType="text/plain" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/x-7z-compressed" />
+                <data android:mimeType="application/x-rar-compressed" />
+                <data android:mimeType="application/vnd.rar" />
+                <data android:mimeType="application/x-rar" />
             </intent-filter>
         </activity>
     </application>

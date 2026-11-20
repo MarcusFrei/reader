@@ -9,19 +9,12 @@ import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -38,16 +31,9 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.Hyphens
-import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -55,14 +41,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.bookreader.AppContainer
-import com.example.bookreader.data.Block
 import com.example.bookreader.data.settings.*
 import com.example.bookreader.device.PhoneBrightnessController
 import com.example.bookreader.domain.*
 import com.example.bookreader.util.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.launch
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
@@ -94,10 +78,10 @@ fun ReaderScreen(bookId: Long, container: AppContainer, onClose: () -> Unit) {
     }
 }
 
-private fun nextTheme(t: ThemeOpt) = when (t) {
-    ThemeOpt.LIGHT -> ThemeOpt.SEPIA
-    ThemeOpt.SEPIA -> ThemeOpt.DARK
-    else -> ThemeOpt.LIGHT
+private fun nextTheme(t: ThemeOpt): ThemeOpt {
+    val order = listOf(ThemeOpt.PARCHMENT, ThemeOpt.SEPIA, ThemeOpt.LIGHT, ThemeOpt.DARK)
+    val i = order.indexOf(t)
+    return if (i < 0) ThemeOpt.PARCHMENT else order[(i + 1) % order.size]
 }
 
 @Composable
@@ -112,13 +96,12 @@ private fun ReaderContent(
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
     val view = LocalView.current
-    val scope = rememberCoroutineScope()
     val content = ready.content
     val total = content.blocks.size
-
-    val listState = rememberLazyListState(
-        initialFirstVisibleItemIndex = ready.startIndex.coerceIn(0, (total - 1).coerceAtLeast(0))
-    )
+    val fonts = remember { FontSet(context.applicationContext) }
+    val body = remember {
+        BodyState(ready.startIndex.coerceIn(0, (total - 1).coerceAtLeast(0)), ready.startOffset)
+    }
 
     var showUi by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
@@ -172,7 +155,7 @@ private fun ReaderContent(
         onDispose { view.keepScreenOn = false }
     }
 
-    // Скрытие всех элементов управления на время чтения
+    // Скрытие системных панелей на время чтения
     LaunchedEffect(showUi) {
         activity?.window?.let { w ->
             val c = WindowCompat.getInsetsController(w, view)
@@ -190,22 +173,22 @@ private fun ReaderContent(
         }
     }
 
-    // Запоминание позиции: при прокрутке (с задержкой), при уходе в фон и при закрытии
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemIndex }.collectLatest { idx ->
+    // Запоминание позиции: при листании (с задержкой), при уходе в фон и при закрытии
+    LaunchedEffect(body) {
+        snapshotFlow { body.block * 100000L + body.char }.collectLatest {
             delay(600)
-            vm.savePosition(idx, total)
+            vm.savePosition(body.block, body.char, total)
         }
     }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val obs = LifecycleEventObserver { _, e ->
-            if (e == Lifecycle.Event.ON_STOP) vm.savePosition(listState.firstVisibleItemIndex, total)
+            if (e == Lifecycle.Event.ON_STOP) vm.savePosition(body.block, body.char, total)
         }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(obs)
-            vm.savePosition(listState.firstVisibleItemIndex, total)
+            vm.savePosition(body.block, body.char, total)
         }
     }
 
@@ -215,27 +198,20 @@ private fun ReaderContent(
             onClose()
         } else {
             val now = SystemClock.elapsedRealtime()
-            if (now - lastBack < 2000) onClose()
-            else {
+            if (now - lastBack < 2000) {
+                onClose()
+            } else {
                 lastBack = now
                 Toast.makeText(context, "Нажмите «Назад» ещё раз, чтобы выйти из книги", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    // ── действия ──
-    val pageBy: (Int) -> Unit = { dir ->
-        scope.launch {
-            val info = listState.layoutInfo
-            val h = (info.viewportSize.height - info.beforeContentPadding - info.afterContentPadding) * 0.92f
-            if (s.pageAnim == PageAnim.NONE) listState.scrollBy(dir * h)
-            else listState.animateScrollBy(dir * h, tween(260))
-        }
-    }
+    // ── действия по жестам ──
     val perform: (ReaderAction) -> Unit = { a ->
         when (a) {
-            ReaderAction.NEXT_PAGE -> { pageBy(1) }
-            ReaderAction.PREV_PAGE -> { pageBy(-1) }
+            ReaderAction.NEXT_PAGE -> { body.turn(1) }
+            ReaderAction.PREV_PAGE -> { body.turn(-1) }
             ReaderAction.TOGGLE_UI -> { showUi = !showUi }
             ReaderAction.ZOOM_TOGGLE -> {
                 zoomed = !zoomed
@@ -275,10 +251,13 @@ private fun ReaderContent(
             else -> {}
         }
     }
-    val pageByNow by rememberUpdatedState(pageBy)
     val hasDouble = s.gestures.any { it.key.endsWith("|DOUBLE_TAP") && it.value != ReaderAction.NONE.name }
     val leftAction = s.actionFor(Zone.LEFT_EDGE, Gesture.VERTICAL_DRAG)
     val rightAction = s.actionFor(Zone.RIGHT_EDGE, Gesture.VERTICAL_DRAG)
+
+    // В режиме страниц размер шрифта применяется после отпускания (пересчёт страниц), в ленте — сразу
+    val zoom = if (zoomed) 1.4f else 1f
+    val fontSp = (if (s.scrollMode == ScrollMode.SCROLL) (liveFont ?: s.fontSize) else s.fontSize) * zoom
 
     // ── вид ──
     Box(
@@ -303,34 +282,11 @@ private fun ReaderContent(
                     onLongPress = { o -> performNow(sNow.actionFor(zoneOf(o.x, w), Gesture.LONG_PRESS)) }
                 )
             }
-            .pointerInput(s.scrollMode) {
-                if (s.scrollMode == ScrollMode.PAGED) {
-                    var dx = 0f
-                    detectHorizontalDragGestures(
-                        onDragStart = { dx = 0f },
-                        onDragEnd = {
-                            if (dx < -120f) pageByNow(1) else if (dx > 120f) pageByNow(-1)
-                        },
-                        onHorizontalDrag = { _, d -> dx += d }
-                    )
-                }
-            }
     ) {
-        val fontSp = (liveFont ?: s.fontSize) * (if (zoomed) 1.4f else 1f)
-        val family = when (s.fontFamily) {
-            FontFamilyOpt.SANS -> FontFamily.SansSerif
-            FontFamilyOpt.SERIF -> FontFamily.Serif
-            FontFamilyOpt.MONO -> FontFamily.Monospace
-        }
-        LazyColumn(
-            state = listState,
-            userScrollEnabled = s.scrollMode == ScrollMode.SCROLL,
-            contentPadding = PaddingValues(top = s.marginTop.dp, bottom = s.marginBottom.dp),
-            modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout)
-        ) {
-            itemsIndexed(content.blocks) { _, b ->
-                BlockView(b, s, fontSp, colors.fg, family)
-            }
+        if (s.scrollMode == ScrollMode.PAGED) {
+            PagedBody(content, s, colors, fontSp, fonts, body)
+        } else {
+            ScrollBody(content, s, colors, fontSp, body)
         }
 
         if (leftAction != ReaderAction.NONE) {
@@ -357,7 +313,10 @@ private fun ReaderContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }
-                    Text(title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleMedium
+                    )
                     IconButton(onClick = { showToc = true }) { Icon(Icons.Filled.Menu, "Оглавление") }
                     IconButton(onClick = { showSettings = true }) { Icon(Icons.Filled.Settings, "Настройки") }
                 }
@@ -365,27 +324,29 @@ private fun ReaderContent(
         }
 
         AnimatedVisibility(showUi, Modifier.align(Alignment.BottomCenter), enter = fadeIn(), exit = fadeOut()) {
-            val idx by remember { derivedStateOf { listState.firstVisibleItemIndex } }
             var drag by remember { mutableStateOf<Float?>(null) }
-            val progress = if (total <= 1) 0f else idx.toFloat() / (total - 1)
-            val chapter = content.chapters.lastOrNull { it.blockIndex <= idx }?.title.orEmpty()
-            val mins = ceil(content.remainingWords(idx) / 200.0).toInt()
+            val fraction = body.fraction
+            val chapter = content.chapters.lastOrNull { it.blockIndex <= body.block }?.title.orEmpty()
+            val mins = ceil(content.remainingWords(body.block) / 200.0).toInt()
             Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f)) {
                 Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Slider(
-                        value = drag ?: progress,
+                        value = drag ?: fraction,
                         onValueChange = { drag = it },
                         onValueChangeFinished = {
-                            val target = ((drag ?: progress) * (total - 1)).toInt()
+                            val target = drag ?: fraction
                             drag = null
-                            scope.launch { listState.scrollToItem(target) }
+                            body.jumpFraction(target)
                         }
                     )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(chapter, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodySmall)
                         Text(
-                            "${((drag ?: progress) * 100).roundToInt()}% · до конца ${formatRemaining(mins)}",
+                            chapter, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        val pageInfo = if (body.pageText.isNotBlank()) "стр. ${body.pageText} · " else ""
+                        Text(
+                            "$pageInfo${((drag ?: fraction) * 100).roundToInt()}% · до конца ${formatRemaining(mins)}",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -410,7 +371,7 @@ private fun ReaderContent(
             chapters = content.chapters,
             onPick = { i ->
                 showToc = false
-                scope.launch { listState.scrollToItem(i.coerceIn(0, (total - 1).coerceAtLeast(0))) }
+                body.jumpBlock(i)
             },
             onDismiss = { showToc = false }
         )
@@ -445,40 +406,4 @@ private fun BoxScope.EdgeStrip(
                 }
             }
     )
-}
-
-@Composable
-private fun BlockView(b: Block, s: ReaderSettings, fontSp: Float, color: Color, family: FontFamily) {
-    val base = TextStyle(
-        fontSize = fontSp.sp,
-        lineHeight = (fontSp * s.lineSpacing).sp,
-        fontFamily = family,
-        fontWeight = if (s.bold) FontWeight.Bold else FontWeight.Normal,
-        color = color,
-        textAlign = if (s.align == AlignOpt.JUSTIFY) TextAlign.Justify else TextAlign.Start,
-        hyphens = Hyphens.Auto,
-        lineBreak = LineBreak.Paragraph
-    )
-    Box(Modifier.fillMaxWidth().padding(start = s.marginLeft.dp, end = s.marginRight.dp)) {
-        if (b.heading) {
-            Text(
-                b.text,
-                modifier = Modifier.fillMaxWidth(s.width.fraction).align(Alignment.Center)
-                    .padding(top = fontSp.dp, bottom = (fontSp * 0.7f).dp),
-                style = base.copy(
-                    fontSize = (fontSp * 1.2f).sp,
-                    lineHeight = (fontSp * 1.2f * s.lineSpacing).sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
-            )
-        } else {
-            Text(
-                b.text,
-                modifier = Modifier.fillMaxWidth(s.width.fraction).align(Alignment.Center)
-                    .padding(bottom = (fontSp * 0.45f).dp),
-                style = base.copy(textIndent = TextIndent(firstLine = (fontSp * 1.4f).sp))
-            )
-        }
-    }
 }
